@@ -312,12 +312,12 @@ function connect(){
     };
 
     ws.onclose = () => {
-        wsStatus.textContent = "▲ 切断されました。2秒後に再接続します...";
+        wsStatus.textContent = "▲ 切断されました。再接続します...";
         wsStatus.style.color = "var(--danger)";
         wsStatus.style.backgroundColor = "var(--danger-light)";
         wsStatus.style.borderColor = "rgba(220, 38, 38, 0.2)";
         clearInterval(pingTimer);
-        reconnectTimer = setTimeout(connect, 2000);
+        reconnectTimer = setTimeout(connect, 100);
     };
 }
 
