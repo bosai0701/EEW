@@ -317,7 +317,7 @@ function connect(){
         wsStatus.style.backgroundColor = "var(--danger-light)";
         wsStatus.style.borderColor = "rgba(220, 38, 38, 0.2)";
         clearInterval(pingTimer);
-        reconnectTimer = setTimeout(connect, 100);
+        reconnectTimer = setTimeout(connect, 1000);
     };
 }
 
