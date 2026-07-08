@@ -145,6 +145,62 @@ h1 {
     border-bottom: none;
 }
 
+/* 計算セクション用テーブル */
+.calc-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 12px;
+}
+.calc-table tr {
+    display: grid;
+    grid-template-columns: 1fr;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+.calc-table tr:last-child {
+    border-bottom: none;
+}
+.calc-table th, .calc-table td {
+    padding: 2px 0;
+    border: none;
+    text-align: left;
+    font-size: 0.875rem;
+}
+.calc-table th {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+.calc-table td {
+    color: var(--text-main);
+    word-break: break-word;
+}
+
+@media (min-width: 576px) {
+    .calc-table tr {
+        grid-template-columns: 240px 1fr;
+        padding: 10px 4px;
+    }
+    .calc-table th, .calc-table td { padding: 0; }
+}
+
+.calculation-area {
+    background-color: #f8fafc;
+    border: 1px dashed var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    margin: 12px 0;
+    font-size: 0.85rem;
+}
+
+.calculation-result {
+    background-color: var(--primary-light);
+    border-left: 3px solid var(--primary);
+    padding: 10px 12px;
+    border-radius: 4px;
+    margin: 8px 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 pre {
     background: #0f172a;
     color: #e2e8f0;
@@ -258,8 +314,23 @@ pre {
             </div>
         </div>
 
+        <div class="section" id="sect-calculation">
+            <div class="section-title">7. 震源距離・深さ計算 (JMA2001走時表)</div>
+            <table class="calc-table">
+                <tr><th>現在時刻</th><td id="d-calc-current-time">-</td></tr>
+                <tr><th>地震発生時刻</th><td id="d-calc-origin-time">-</td></tr>
+                <tr><th>経過時間 A (秒)</th><td id="d-calc-elapsed">-</td></tr>
+                <tr><th>震源深さ</th><td id="d-calc-depth">-</td></tr>
+                <tr><th>P波速度</th><td id="d-calc-pwave-vel">-</td></tr>
+                <tr><th>S波速度</th><td id="d-calc-swave-vel">-</td></tr>
+            </table>
+            <div class="calculation-area" id="d-calc-results">
+                <div style="color:var(--text-muted); font-size:0.875rem;">計算データがあります</div>
+            </div>
+        </div>
+
         <div class="section">
-            <div class="section-title">7. 電文テキスト (originalTelegram)</div>
+            <div class="section-title">8. 電文テキスト (originalTelegram)</div>
             <pre id="d-telegram">-</pre>
         </div>
 
@@ -271,6 +342,31 @@ pre {
 </div>
 
 <script>
+// JMA2001走時表データ
+const jmaWaveData = [
+    {depth: 0.0, pWave: 4.800, sWave: 2.844},
+    {depth: 0.5, pWave: 4.950, sWave: 2.931},
+    {depth: 1.0, pWave: 5.090, sWave: 3.012},
+    {depth: 1.5, pWave: 5.220, sWave: 3.088},
+    {depth: 2.0, pWave: 5.340, sWave: 3.157},
+    {depth: 2.5, pWave: 5.450, sWave: 3.221},
+    {depth: 3.0, pWave: 5.550, sWave: 3.278},
+    {depth: 3.5, pWave: 5.640, sWave: 3.329},
+    {depth: 4.0, pWave: 5.720, sWave: 3.375},
+    {depth: 4.5, pWave: 5.780, sWave: 3.409},
+    {depth: 5.0, pWave: 5.820, sWave: 3.431},
+    {depth: 5.5, pWave: 5.840, sWave: 3.441},
+    {depth: 6.0, pWave: 5.860, sWave: 3.451},
+    {depth: 6.5, pWave: 5.880, sWave: 3.461},
+    {depth: 7.0, pWave: 5.900, sWave: 3.471},
+    {depth: 7.5, pWave: 5.920, sWave: 3.481},
+    {depth: 8.0, pWave: 5.940, sWave: 3.491},
+    {depth: 8.5, pWave: 5.960, sWave: 3.501},
+    {depth: 9.0, pWave: 5.980, sWave: 3.511},
+    {depth: 9.5, pWave: 6.000, sWave: 3.521},
+    {depth: 10.0, pWave: 6.020, sWave: 3.531},
+];
+
 const wsStatus = document.getElementById("ws-status");
 const eewContent = document.getElementById("eew-content");
 const noData = document.getElementById("no-data");
@@ -278,6 +374,110 @@ const noData = document.getElementById("no-data");
 let ws;
 let pingTimer;
 let reconnectTimer;
+let currentTimeTimer;
+let lastData = null;
+
+// 走時表から深さに該当するP波・S波速度を取得
+function getWaveDataForDepth(depth) {
+    if (depth < 0 || !jmaWaveData.length) return null;
+    
+    // 深さ範囲を超える場合は最後のデータを返す
+    if (depth >= jmaWaveData[jmaWaveData.length - 1].depth) {
+        return jmaWaveData[jmaWaveData.length - 1];
+    }
+    
+    // 線形補間で該当データを探す
+    for (let i = 0; i < jmaWaveData.length - 1; i++) {
+        const current = jmaWaveData[i];
+        const next = jmaWaveData[i + 1];
+        
+        if (depth >= current.depth && depth <= next.depth) {
+            const ratio = (depth - current.depth) / (next.depth - current.depth);
+            return {
+                depth: depth,
+                pWave: current.pWave + (next.pWave - current.pWave) * ratio,
+                sWave: current.sWave + (next.sWave - current.sWave) * ratio
+            };
+        }
+    }
+    
+    return jmaWaveData[jmaWaveData.length - 1];
+}
+
+// 計算セクションを更新
+function updateCalculation(data) {
+    const sectCalc = document.getElementById("sect-calculation");
+    
+    if (!data || data.isCancel || !data.hypocenter || data.hypocenter.location.depth === undefined || !data.originTime) {
+        sectCalc.style.display = "none";
+        clearInterval(currentTimeTimer);
+        return;
+    }
+    
+    sectCalc.style.display = "block";
+    
+    const currentTime = new Date();
+    const currentTimeStr = currentTime.toLocaleTimeString('ja-JP', { hour12: false });
+    document.getElementById("d-calc-current-time").textContent = currentTimeStr;
+    
+    // originTimeをパース（例: "2024-01-01T12:34:56.789Z" フォーマット）
+    const originDate = new Date(data.originTime);
+    const originTimeStr = originDate.toLocaleTimeString('ja-JP', { hour12: false });
+    document.getElementById("d-calc-origin-time").textContent = originTimeStr;
+    
+    // 経過時間を秒単位で計算
+    const elapsedMs = currentTime.getTime() - originDate.getTime();
+    const elapsedSec = Math.round(elapsedMs / 1000);
+    const elapsedStr = elapsedSec >= 0 ? `${elapsedSec}秒` : "計算中...";
+    document.getElementById("d-calc-elapsed").textContent = elapsedStr;
+    
+    // 震源深さ
+    const depth = data.hypocenter.location.depth;
+    document.getElementById("d-calc-depth").textContent = `${depth} km`;
+    
+    // 走時表からP波・S波速度を取得
+    const waveData = getWaveDataForDepth(depth);
+    
+    if (waveData) {
+        const pWaveVel = waveData.pWave.toFixed(3);
+        const sWaveVel = waveData.sWave.toFixed(3);
+        
+        document.getElementById("d-calc-pwave-vel").textContent = `${pWaveVel} km/s`;
+        document.getElementById("d-calc-swave-vel").textContent = `${sWaveVel} km/s`;
+        
+        // 計算結果を表示
+        if (elapsedSec >= 0) {
+            const pDistance = (elapsedSec * waveData.pWave).toFixed(2);
+            const sDistance = (elapsedSec * waveData.sWave).toFixed(2);
+            
+            // 2000km以上に達したかチェック
+            const limitReached = pDistance >= 2000 || sDistance >= 2000;
+            
+            let resultsHtml = `
+                <div class="calculation-result">
+                    <strong>経過時間:</strong> ${elapsedSec}秒<br/>
+                    <strong>P波到達距離:</strong> ${limitReached ? '2000.00 km (計算上限)' : pDistance + ' km'} (A × P波速度)<br/>
+                    <strong>S波到達距離:</strong> ${limitReached ? '2000.00 km (計算上限)' : sDistance + ' km'} (A × S波速度)
+                </div>
+            `;
+            document.getElementById("d-calc-results").innerHTML = resultsHtml;
+        }
+    } else {
+        document.getElementById("d-calc-pwave-vel").textContent = "-";
+        document.getElementById("d-calc-swave-vel").textContent = "-";
+        document.getElementById("d-calc-results").innerHTML = '<div style="color:var(--text-muted); font-size:0.875rem;">走時表データが利用できません</div>';
+    }
+}
+
+// 現在時刻だけを継続的に更新（2000km以上の場合）
+function startCurrentTimeUpdate(data) {
+    clearInterval(currentTimeTimer);
+    currentTimeTimer = setInterval(() => {
+        const currentTime = new Date();
+        const currentTimeStr = currentTime.toLocaleTimeString('ja-JP', { hour12: false });
+        document.getElementById("d-calc-current-time").textContent = currentTimeStr;
+    }, 1000);
+}
 
 function connect(){
     clearTimeout(reconnectTimer);
@@ -305,7 +505,10 @@ function connect(){
 
         try {
             const data = JSON.parse(event.data);
+            lastData = data;
             renderEEW(data);
+            updateCalculation(data);
+            startCurrentTimeUpdate(data);
         } catch(e) {
             console.error("JSONのパースに失敗しました", e);
         }
@@ -317,6 +520,7 @@ function connect(){
         wsStatus.style.backgroundColor = "var(--danger-light)";
         wsStatus.style.borderColor = "rgba(220, 38, 38, 0.2)";
         clearInterval(pingTimer);
+        clearInterval(currentTimeTimer);
         reconnectTimer = setTimeout(connect, 1000);
     };
 }
